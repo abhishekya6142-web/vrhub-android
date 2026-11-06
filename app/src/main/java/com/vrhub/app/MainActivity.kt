@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Size
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +28,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import java.util.concurrent.Executors
 
 class DotView(c: Context) : View(c) {
@@ -55,11 +57,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dot: DotView
     private lateinit var info: TextView
     private val executor = Executors.newSingleThreadExecutor()
-    private var landmarker: HandLandmarker? = null
-    private var delegateName = "none"
-    private var frames = 0
+    @Volatile private var landmarker: HandLandmarker? = null
+    @Volatile private var delegateName = "none"
+    @Volatile private var iw = 1
+    @Volatile private var ih = 1
+    @Volatile private var submitNs = 0L
+    private var camFrames = 0
+    private var handFrames = 0
     private var lastTime = System.nanoTime()
-    private var inferMs = 0L
+    private var sx = -1f
+    private var sy = -1f
 
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -110,17 +117,65 @@ class MainActivity : AppCompatActivity() {
                     .build()
                 val opts = HandLandmarker.HandLandmarkerOptions.builder()
                     .setBaseOptions(base)
-                    .setRunningMode(RunningMode.IMAGE)
+                    .setRunningMode(RunningMode.LIVE_STREAM)
                     .setNumHands(1)
+                    .setResultListener { res, _ -> onResult(res) }
+                    .setErrorListener { }
                     .build()
                 val lm = HandLandmarker.createFromOptions(this, opts)
                 delegateName = d.name
                 return lm
             } catch (e: Exception) {
-                // try next delegate
+                // next delegate
             }
         }
         return null
+    }
+
+    private fun onResult(res: HandLandmarkerResult) {
+        val lat = (System.nanoTime() - submitNs) / 1_000_000
+        val hand = res.landmarks().firstOrNull()
+        var x = -1f
+        var y = -1f
+        if (hand != null) {
+            val tx = hand[8].x()
+            val ty = hand[8].y()
+            if (sx < 0f) {
+                sx = tx
+                sy = ty
+            } else {
+                sx += (tx - sx) * 0.6f
+                sy += (ty - sy) * 0.6f
+            }
+            x = sx
+            y = sy
+        } else {
+            sx = -1f
+            sy = -1f
+        }
+
+        handFrames++
+        val now = System.nanoTime()
+        val elapsed = now - lastTime
+        var text: String? = null
+        if (elapsed >= 1_000_000_000L) {
+            val camFps = camFrames * 1_000_000_000.0 / elapsed
+            val handFps = handFrames * 1_000_000_000.0 / elapsed
+            camFrames = 0
+            handFrames = 0
+            lastTime = now
+            text = String.format("cam %.0f | hand %.0f FPS | lat %d ms | %s", camFps, handFps, lat, delegateName)
+        }
+        val w = iw
+        val h = ih
+        runOnUiThread {
+            dot.nx = x
+            dot.ny = y
+            dot.iw = w
+            dot.ih = h
+            dot.invalidate()
+            if (text != null) info.text = text
+        }
     }
 
     private fun startCamera() {
@@ -146,40 +201,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 proxy.close()
 
-                var x = -1f
-                var y = -1f
+                camFrames++
+                iw = bmp.width
+                ih = bmp.height
                 val lm = landmarker
                 if (lm != null) {
-                    val t0 = System.nanoTime()
-                    val res = lm.detect(BitmapImageBuilder(bmp).build())
-                    inferMs = (System.nanoTime() - t0) / 1_000_000
-                    val hand = res.landmarks().firstOrNull()
-                    if (hand != null) {
-                        x = hand[8].x()
-                        y = hand[8].y()
-                    }
-                }
-
-                frames++
-                val now = System.nanoTime()
-                val elapsed = now - lastTime
-                val iw = bmp.width
-                val ih = bmp.height
-                val fpsText = if (elapsed >= 1_000_000_000L) {
-                    val fps = frames * 1_000_000_000.0 / elapsed
-                    frames = 0
-                    lastTime = now
-                    String.format("FPS %.1f | infer %d ms | %s", fps, inferMs, delegateName)
-                } else null
-
-                runOnUiThread {
-                    dot.nx = x
-                    dot.ny = y
-                    dot.iw = iw
-                    dot.ih = ih
-                    dot.invalidate()
-                    if (fpsText != null) {
-                        info.text = if (landmarker == null) "$fpsText | model load ho raha hai ya fail" else fpsText
+                    submitNs = System.nanoTime()
+                    try {
+                        lm.detectAsync(BitmapImageBuilder(bmp).build(), SystemClock.uptimeMillis())
+                    } catch (e: Exception) {
+                        // skip frame
                     }
                 }
             }
