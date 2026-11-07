@@ -103,7 +103,13 @@ class UpdateManager(
                     @Suppress("DEPRECATION")
                     packageInfo.versionCode.toLong()
                 }
-                onResult(if (latest.versionCode > installedCode) latest else null)
+                if (latest.versionCode > installedCode) {
+                    onStatus("Update available: ${latest.versionName}")
+                    onResult(latest)
+                } else {
+                    onStatus("VR Hub is up to date.")
+                    onResult(null)
+                }
             } catch (e: Exception) {
                 onStatus("Update check nahi ho saka: ${e.message ?: "Network error"}")
                 onResult(null)
