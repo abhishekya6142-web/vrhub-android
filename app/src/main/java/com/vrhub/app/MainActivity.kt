@@ -13,10 +13,13 @@ import android.os.SystemClock
 import android.util.Size
 import android.view.View
 import android.view.ViewGroup
+import android.view.Gravity
 import android.widget.FrameLayout
+import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -30,6 +33,8 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import java.util.concurrent.Executors
+import com.vrhub.app.updates.UpdateInfo
+import com.vrhub.app.updates.UpdateManager
 
 class DotView(c: Context) : View(c) {
     var nx = -1f
@@ -56,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var dot: DotView
     private lateinit var info: TextView
+    private lateinit var updateManager: UpdateManager
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var landmarker: HandLandmarker? = null
     @Volatile private var delegateName = "none"
@@ -95,7 +101,24 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         )
+        val updateButton = Button(this).apply {
+            text = "Check Updates"
+            setOnClickListener { checkForAppUpdates() }
+        }
+        val updateParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        ).apply {
+            topMargin = 12
+            marginEnd = 12
+        }
+        root.addView(updateButton, updateParams)
         setContentView(root)
+
+        updateManager = UpdateManager(this) { message ->
+            runOnUiThread { info.text = message }
+        }
 
         executor.execute { landmarker = buildLandmarker() }
 
@@ -106,6 +129,28 @@ class MainActivity : AppCompatActivity() {
         } else {
             permLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun checkForAppUpdates() {
+        updateManager.checkForUpdates { update ->
+            runOnUiThread {
+                if (update != null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Update available: ${update.versionName}")
+                        .setMessage(update.releaseNotes)
+                        .setNegativeButton("Later", null)
+                        .setPositiveButton("Download & Install") { _, _ ->
+                            updateManager.downloadAndInstall(update)
+                        }
+                        .show()
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        if (::updateManager.isInitialized) updateManager.close()
+        super.onDestroy()
     }
 
     private fun buildLandmarker(): HandLandmarker? {
