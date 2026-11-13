@@ -11,9 +11,9 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.io.File
 import java.util.concurrent.Executors
 
 class UpdateManager(
@@ -21,7 +21,6 @@ class UpdateManager(
     private val onStatus: (String) -> Unit
 ) {
     companion object {
-        // Update this JSON whenever a new GitHub Release is published.
         private const val UPDATE_JSON_URL =
             "https://raw.githubusercontent.com/abhishekya6142-web/vrhub-android/main/update.json"
         private const val APK_FILE_NAME = "vrhub-update.apk"
@@ -37,15 +36,17 @@ class UpdateManager(
             if (id != pendingDownloadId) return
 
             val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val query = DownloadManager.Query().setFilterById(id)
-            manager.query(query).use { cursor ->
+            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
                 if (!cursor.moveToFirst()) {
                     onStatus("Download status nahi mil saka.")
                     return
                 }
                 val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                val status = cursor.getInt(statusIndex)
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (statusIndex < 0) {
+                    onStatus("Download status nahi mil saka.")
+                    return
+                }
+                if (cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL) {
                     onStatus("Download complete. Installer open ho raha hai...")
                     installDownloadedApk()
                 } else {
@@ -60,7 +61,8 @@ class UpdateManager(
     init {
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
         if (Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            // DownloadManager sends this broadcast from outside our app.
+            context.registerReceiver(downloadReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             context.registerReceiver(downloadReceiver, filter)
@@ -126,7 +128,10 @@ class UpdateManager(
         }
         try {
             val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), APK_FILE_NAME)
-            if (file.exists()) file.delete()
+            if (file.exists() && !file.delete()) {
+                onStatus("Purani update file remove nahi hui.")
+                return
+            }
             val request = DownloadManager.Request(Uri.parse(update.apkUrl))
                 .setTitle("VR Hub update ${update.versionName}")
                 .setDescription("Downloading update...")
@@ -137,7 +142,7 @@ class UpdateManager(
                 .setAllowedOverRoaming(false)
             val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             pendingDownloadId = manager.enqueue(request)
-            onStatus("Update download start ho gaya.")
+            onStatus("Update download start ho gaya. Download complete hone par installer khulega.")
         } catch (e: Exception) {
             onStatus("Download start nahi hua: ${e.message}")
         }
@@ -145,10 +150,16 @@ class UpdateManager(
 
     private fun installDownloadedApk() {
         try {
+            val apk = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), APK_FILE_NAME)
+            if (!apk.isFile || apk.length() == 0L) {
+                onStatus("Downloaded APK nahi mili ya file khaali hai.")
+                return
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                 !context.packageManager.canRequestPackageInstalls()
             ) {
-                onStatus("VR Hub ko is source se install permission dein, phir Check Updates dobara dabayein.")
+                onStatus("Install permission allow karo, phir downloaded APK ko dobara install karo.")
                 val settingsIntent = Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:${context.packageName}")
@@ -157,19 +168,19 @@ class UpdateManager(
                 return
             }
 
-            val apk = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), APK_FILE_NAME)
             val uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
                 apk
             )
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(installIntent)
+            onStatus("Android installer khul raha hai. Wahan Install dabao.")
         } catch (e: Exception) {
-            onStatus("Installer open nahi hua: ${e.message}")
+            onStatus("Installer open nahi hua: ${e.message ?: "Unknown error"}")
         }
     }
 
