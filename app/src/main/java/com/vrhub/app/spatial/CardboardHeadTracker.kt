@@ -34,6 +34,7 @@ class CardboardHeadTracker(context: Context) : SensorEventListener {
         private set
 
     val isAvailable: Boolean get() = rotationSensor != null
+    var onPoseChanged: ((Float, Float, Float) -> Unit)? = null
 
     fun start() {
         rotationSensor?.let {
@@ -69,6 +70,7 @@ class CardboardHeadTracker(context: Context) : SensorEventListener {
         yawRadians = wrapPi(orientation[0] - yawOffset)
         pitchRadians = orientation[1]
         rollRadians = orientation[2]
+        onPoseChanged?.invoke(yawRadians, pitchRadians, rollRadians)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
