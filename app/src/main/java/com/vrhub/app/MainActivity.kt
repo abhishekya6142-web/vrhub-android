@@ -8,15 +8,20 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Size
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -30,6 +35,8 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import com.vrhub.app.updates.UpdateInfo
+import com.vrhub.app.updates.UpdateManager
 import java.util.concurrent.Executors
 
 class DotView(c: Context) : View(c) {
@@ -55,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var dot: DotView
     private lateinit var info: TextView
+    private lateinit var updateManager: UpdateManager
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var landmarker: HandLandmarker? = null
     @Volatile private var delegateName = "none"
@@ -77,6 +85,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         root = FrameLayout(this)
         setContentView(root)
+        updateManager = UpdateManager(this) { message ->
+            runOnUiThread {
+                if (!isFinishing) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }
         showHome()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -94,7 +107,51 @@ class MainActivity : AppCompatActivity() {
         root.addView(HomeScreenView(this) { requestStart() },
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // Update control is deliberately kept separate from the animated START button.
+        val updateButton = Button(this).apply {
+            text = "CHECK UPDATES"
+            textSize = 11f
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(0xDD123B60.toInt())
+                cornerRadius = 24f
+                setStroke(1, 0xFF67DDF2.toInt())
+            }
+            setPadding(dp(14), dp(5), dp(14), dp(5))
+            setOnClickListener { checkForUpdates() }
+        }
+        val params = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.TOP or Gravity.END
+        ).apply {
+            topMargin = dp(12)
+            marginEnd = dp(16)
+        }
+        root.addView(updateButton, params)
     }
+
+    private fun checkForUpdates() {
+        updateManager.checkForUpdates { update ->
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                if (update != null) showUpdateDialog(update)
+            }
+        }
+    }
+
+    private fun showUpdateDialog(update: UpdateInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("VR Hub update ${update.versionName}")
+            .setMessage(update.releaseNotes.ifBlank { "A new version is available." })
+            .setNegativeButton("Later", null)
+            .setPositiveButton("Download & Install") { _, _ ->
+                updateManager.downloadAndInstall(update)
+            }
+            .show()
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun requestStart() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
@@ -135,6 +192,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         try { landmarker?.close() } catch (_: Exception) { }
+        if (::updateManager.isInitialized) updateManager.close()
         executor.shutdown()
         super.onDestroy()
     }
