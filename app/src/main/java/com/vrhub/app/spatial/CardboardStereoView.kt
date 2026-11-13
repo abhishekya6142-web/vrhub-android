@@ -79,7 +79,6 @@ class CardboardStereoView(context: Context) : GLSurfaceView(context) {
         }
 
         override fun onDrawFrame(gl: GL10?) {
-            val w = android.opengl.GLES20.glGetInteger(GLES20.GL_VIEWPORT, IntArray(4), 0)
             val viewport = IntArray(4)
             GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0)
             val width = viewport[2].coerceAtLeast(2)
