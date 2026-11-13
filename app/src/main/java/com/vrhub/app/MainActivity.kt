@@ -163,10 +163,14 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Choose your experience")
             .setItems(arrayOf("Phone AR", "Cardboard VR (3D)")) { _, which ->
                 pendingCardboard = which == 1
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                if (pendingCardboard) {
+                    startCardboardExperience()
+                } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                     == PackageManager.PERMISSION_GRANTED) {
-                    if (pendingCardboard) startCardboardExperience() else startExperience()
-                } else permLauncher.launch(Manifest.permission.CAMERA)
+                    startExperience()
+                } else {
+                    permLauncher.launch(Manifest.permission.CAMERA)
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
