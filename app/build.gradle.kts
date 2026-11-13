@@ -11,9 +11,26 @@ android {
         applicationId = "com.vrhub.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("${rootProject.projectDir}/vrhub-upload-key.jks")
+            storePassword = System.getenv("VRHUB_KEY_PASSWORD")
+            keyAlias = System.getenv("VRHUB_KEY_ALIAS")
+            keyPassword = System.getenv("VRHUB_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
