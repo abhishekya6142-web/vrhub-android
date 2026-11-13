@@ -3,7 +3,14 @@ name: Build APK
 on:
   push:
     branches: [main]
+    paths:
+      - "app/**"
+      - "update.json"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -23,12 +30,31 @@ jobs:
       - name: Download hand model
         run: |
           mkdir -p app/src/main/assets
-          curl -L -o app/src/main/assets/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+          curl -fL --retry 3 -o app/src/main/assets/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 
       - name: Build APK
         run: gradle assembleDebug
 
-      - uses: actions/upload-artifact@v4
+      - name: Prepare release APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk app-release.apk
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
         with:
           name: vrhub-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app-release.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2
+          name: VR Hub 0.2
+          target_commitish: ${{ github.sha }}
+          body: |
+            VR Hub 0.2
+            - Cardboard side-by-side stereo renderer
+            - Head rotation tracking and recenter control
+            - Phone AR and Cardboard mode selection
+          files: app-release.apk
+          fail_on_unmatched_files: true
