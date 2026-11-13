@@ -27,16 +27,30 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Prepare signing key
+        env:
+          VRHUB_KEYSTORE_BASE64: ${{ secrets.VRHUB_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$VRHUB_KEYSTORE_BASE64"
+          echo "$VRHUB_KEYSTORE_BASE64" | base64 --decode > app/vrhub-upload-key.jks
+          test -s app/vrhub-upload-key.jks
+
       - name: Download hand model
         run: |
           mkdir -p app/src/main/assets
           curl -fL --retry 3 -o app/src/main/assets/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 
-      - name: Build APK
-        run: gradle assembleDebug
+      - name: Build signed release APK
+        env:
+          VRHUB_KEY_PASSWORD: ${{ secrets.VRHUB_KEY_PASSWORD }}
+          VRHUB_KEY_ALIAS: ${{ secrets.VRHUB_KEY_ALIAS }}
+        run: |
+          test -n "$VRHUB_KEY_PASSWORD"
+          test -n "$VRHUB_KEY_ALIAS"
+          gradle assembleRelease
 
       - name: Prepare release APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk app-release.apk
+        run: cp app/build/outputs/apk/release/app-release.apk app-release.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -48,13 +62,17 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2
-          name: VR Hub 0.2
+          tag_name: v0.3
+          name: VR Hub 0.3
           target_commitish: ${{ github.sha }}
           body: |
-            VR Hub 0.2
-            - Cardboard side-by-side stereo renderer
-            - Head rotation tracking and recenter control
-            - Phone AR and Cardboard mode selection
+            VR Hub 0.3
+            - Persistent release signing
+            - Improved APK update installer handoff
+            - Cardboard and phone AR mode support
           files: app-release.apk
           fail_on_unmatched_files: true
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f app/vrhub-upload-key.jks
