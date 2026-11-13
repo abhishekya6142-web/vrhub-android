@@ -17,7 +17,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("${rootProject.projectDir}/vrhub-upload-key.jks")
+            storeFile = file("vrhub-upload-key.jks")
             storePassword = System.getenv("VRHUB_KEY_PASSWORD")
             keyAlias = System.getenv("VRHUB_KEY_ALIAS")
             keyPassword = System.getenv("VRHUB_KEY_PASSWORD")
