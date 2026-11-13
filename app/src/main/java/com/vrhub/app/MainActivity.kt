@@ -35,6 +35,8 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import com.vrhub.app.spatial.CardboardHeadTracker
+import com.vrhub.app.spatial.CardboardStereoView
 import com.vrhub.app.updates.UpdateInfo
 import com.vrhub.app.updates.UpdateManager
 import java.util.concurrent.Executors
@@ -75,10 +77,13 @@ class MainActivity : AppCompatActivity() {
     private var sx = -1f
     private var sy = -1f
     private var experienceStarted = false
+    private var pendingCardboard = false
+    private var cardboardView: CardboardStereoView? = null
+    private var headTracker: CardboardHeadTracker? = null
 
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok) startExperience() else showHome()
+            if (ok) { if (pendingCardboard) startCardboardExperience() else startExperience() } else showHome()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,9 +159,51 @@ class MainActivity : AppCompatActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun requestStart() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-            == PackageManager.PERMISSION_GRANTED) startExperience()
-        else permLauncher.launch(Manifest.permission.CAMERA)
+        AlertDialog.Builder(this)
+            .setTitle("Choose your experience")
+            .setItems(arrayOf("Phone AR", "Cardboard VR (3D)")) { _, which ->
+                pendingCardboard = which == 1
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED) {
+                    if (pendingCardboard) startCardboardExperience() else startExperience()
+                } else permLauncher.launch(Manifest.permission.CAMERA)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun startCardboardExperience() {
+        if (experienceStarted) return
+        experienceStarted = true
+        root.removeAllViews()
+        val stereo = CardboardStereoView(this)
+        cardboardView = stereo
+        root.addView(stereo, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val recenter = Button(this).apply {
+            text = "RECENTER"
+            setOnClickListener { stereo.recenter(); headTracker?.recenter() }
+        }
+        root.addView(recenter, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(44), Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(12); marginEnd = dp(12)
+        })
+        val label = TextView(this).apply {
+            text = "CARDBOARD STEREO 3D  •  HEAD TRACKING"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x66000000)
+            textSize = 12f
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+        }
+        root.addView(label, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(12) })
+        val tracker = CardboardHeadTracker(this)
+        headTracker = tracker
+        tracker.onPoseChanged = { yaw, pitch, roll -> stereo.setHeadPose(yaw, pitch, roll) }
+        if (tracker.isAvailable) tracker.start()
+        else Toast.makeText(this, "Rotation sensor not available; showing fixed stereo view", Toast.LENGTH_LONG).show()
+        stereo.onResume()
     }
 
     private fun startExperience() {
@@ -186,8 +233,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopExperience() {
         experienceStarted = false
+        headTracker?.stop()
+        headTracker = null
+        cardboardView?.onPause()
+        cardboardView = null
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() }
         catch (_: Exception) { }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (experienceStarted) {
+            cardboardView?.onResume()
+            headTracker?.start()
+        }
+    }
+
+    override fun onPause() {
+        headTracker?.stop()
+        cardboardView?.onPause()
+        super.onPause()
     }
 
     override fun onDestroy() {
